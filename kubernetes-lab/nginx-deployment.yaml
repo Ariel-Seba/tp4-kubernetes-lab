@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: nginx
+
+spec:
+  replicas: 3
+
+  selector:
+    matchLabels:
+      app: nginx
+
+  template:
+    metadata:
+      labels:
+        app: nginx
+
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:latest
+
+          ports:
+            - containerPort: 80
+
+          env:
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: password
+
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html
+            - name: datos
+              mountPath: /datos
+
+      volumes:
+        - name: html
+          configMap:
+            name: nginx-config
+            items:
+              - key: index.html
+                path: index.html
+        - name: datos
+          persistentVolumeClaim:
+            claimName: nginx-pvc

@@ -1,0 +1,299 @@
+LABORATORIO KUBERNETES CON K3D (MAC + DOCKER)
+
+OBJETIVO
+
+Levantar un cluster Kubernetes local utilizando K3d, desplegar una
+aplicación Nginx, escalarla, exponerla mediante Services y comprender el
+networking interno del cluster.
+
+1. DIAGNÓSTICO INICIAL
+
+Se detectó que existían varios clusters K3d:
+
+    k3d cluster list
+
+Resultado observado:
+
+    calicovet
+    lab-k8s
+    tp-k8s
+    curso-k8s
+
+También se verificaron los contextos de kubectl:
+
+    kubectl config get-contexts
+
+2. PROBLEMA DE KUBECONFIG
+
+Al intentar utilizar el cluster curso-k8s, kubectl seguía apuntando a
+otro cluster (calicovet) o a un endpoint inválido.
+
+Verificaciones realizadas:
+
+    kubectl config current-context
+    kubectl get nodes
+
+Error observado:
+
+    The connection to the server 0.0.0.0:xxxxx was refused
+
+Se identificó que el kubeconfig correcto estaba en:
+
+    ~/.config/k3d/kubeconfig-curso-k8s.yaml
+
+Prueba exitosa:
+
+    kubectl --kubeconfig=/Users/ariel.a.seba/.config/k3d/kubeconfig-curso-k8s.yaml get nodes
+
+Resultado:
+
+    k3d-curso-k8s-server-0
+    k3d-curso-k8s-agent-0
+    k3d-curso-k8s-agent-1
+
+3. CONFIGURACIÓN DEL KUBECONFIG
+
+Se configuró la variable de entorno:
+
+    export KUBECONFIG=/Users/ariel.a.seba/.config/k3d/kubeconfig-curso-k8s.yaml
+
+Verificación:
+
+    kubectl config current-context
+
+Resultado:
+
+    k3d-curso-k8s
+
+4. VALIDACIÓN DEL CLUSTER
+
+Comandos:
+
+    kubectl get nodes
+
+Resultado:
+
+    1 Control Plane
+    2 Worker Nodes
+
+Todos en estado Ready.
+
+5. CREACIÓN DEL DEPLOYMENT NGINX
+
+Archivo:
+
+    nginx-deployment.yaml
+
+Aplicación:
+
+    kubectl apply -f nginx-deployment.yaml
+
+Verificación:
+
+    kubectl get all
+
+Resultado:
+
+    Deployment nginx
+    ReplicaSet nginx
+    3 Pods nginx
+
+6. ANÁLISIS DE PODS
+
+Comando:
+
+    kubectl get pods -o wide
+
+Observación:
+
+    Los Pods fueron distribuidos entre los nodos del cluster.
+
+Ejemplo:
+
+    k3d-curso-k8s-agent-0
+    k3d-curso-k8s-agent-1
+    k3d-curso-k8s-server-0
+
+Concepto aprendido:
+
+    Kubernetes Scheduler distribuye cargas entre nodos disponibles.
+
+7. ESCALADO DEL DEPLOYMENT
+
+Escalado:
+
+    kubectl scale deployment nginx --replicas=6
+
+Verificación:
+
+    kubectl get pods -o wide
+
+Resultado:
+
+    6 Pods ejecutándose
+
+Distribución observada:
+
+    2 Pods en agent-0
+    2 Pods en agent-1
+    2 Pods en server-0
+
+Concepto:
+
+    Kubernetes intenta distribuir las réplicas de manera equilibrada.
+
+8. CREACIÓN DE SERVICE CLUSTERIP
+
+Archivo:
+
+    nginx-service.yaml
+
+Aplicación:
+
+    kubectl apply -f nginx-service.yaml
+
+Verificación:
+
+    kubectl get svc
+
+Resultado:
+
+    nginx-service   ClusterIP
+
+Concepto:
+
+    ClusterIP permite acceso interno dentro del cluster.
+
+9. VALIDACIÓN DE ENDPOINTS
+
+Comando:
+
+    kubectl get endpoints nginx-service
+
+Resultado:
+
+    10.42.x.x:80
+    10.42.x.x:80
+    ...
+
+Concepto:
+
+    El Service detecta automáticamente los Pods mediante Labels y Selectors.
+
+10. PRUEBA DE DNS INTERNO
+
+Pod temporal:
+
+    kubectl run test --rm -it --image=busybox -- sh
+
+Dentro del Pod:
+
+    nslookup nginx-service
+
+Resultado:
+
+    nginx-service.default.svc.cluster.local
+    10.43.131.153
+
+Conceptos aprendidos:
+
+    CoreDNS
+    Service Discovery
+    DNS interno de Kubernetes
+
+11. CREACIÓN DE SERVICE NODEPORT
+
+Archivo:
+
+    nginx-nodeport.yaml
+
+Aplicación:
+
+    kubectl apply -f nginx-nodeport.yaml
+
+Verificación:
+
+    kubectl get svc
+
+Resultado:
+
+    nginx-nodeport   NodePort   80:30080/TCP
+
+Concepto:
+
+    NodePort expone servicios a través de los nodos.
+
+12. DIAGNÓSTICO DE ACCESO EXTERNO
+
+Comandos:
+
+    kubectl describe svc nginx-nodeport
+    docker ps | grep curso-k8s
+
+Resultado:
+
+    El NodePort existía correctamente.
+    Los Endpoints existían correctamente.
+
+Problema detectado:
+
+    K3d no publicó el puerto NodePort hacia macOS.
+
+Container observado:
+
+    k3d-curso-k8s-serverlb
+
+Puertos publicados:
+
+    0.0.0.0:64679 -> 6443
+
+Conclusión:
+
+    El cluster fue creado sin mapear puertos HTTP hacia el host.
+
+13. VALIDACIÓN FINAL DEL NETWORKING
+
+Pod temporal:
+
+    kubectl run curlpod --rm -it --image=curlimages/curl -- sh
+
+Prueba:
+
+    curl http://nginx-service
+
+Resultado:
+
+    Welcome to nginx!
+
+Concepto validado:
+
+    curlpod
+       ↓
+    CoreDNS
+       ↓
+    Service
+       ↓
+    Endpoints
+       ↓
+    Pods nginx
+
+14. CONOCIMIENTOS ADQUIRIDOS
+
+✔ K3d ✔ K3s ✔ kubectl ✔ Contextos ✔ Kubeconfig ✔ Deployments ✔
+ReplicaSets ✔ Pods ✔ Scheduler ✔ Scaling ✔ Services ClusterIP ✔ Services
+NodePort ✔ Endpoints ✔ CoreDNS ✔ DNS interno ✔ Service Discovery ✔
+Networking entre Pods ✔ Troubleshooting básico
+
+PRÓXIMOS TEMAS RECOMENDADOS
+
+-   Port Forward
+-   Rolling Updates
+-   Rollback
+-   ConfigMaps
+-   Secrets
+-   Namespaces
+-   Ingress
+-   Traefik
+-   ArgoCD
+-   Helm
+-   Persistent Volumes
