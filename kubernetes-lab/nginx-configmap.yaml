@@ -7,6 +7,6 @@ data:
   index.html: |
     <html>
       <body>
-        <h1>Hola desde ConfigMap!</h1>
+        <h1>Hola desde ArgoCD + GitOps!</h1>
       </body>
     </html>
