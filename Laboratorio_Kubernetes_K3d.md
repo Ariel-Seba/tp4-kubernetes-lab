@@ -711,3 +711,139 @@ kubectl exec -it <nuevo-pod> -- cat /datos/test.txt
 ---
 
 - [x] Persistent Volumes
+
+---
+
+## Sesión 4 — Backups
+
+### Las tres capas de backup en Kubernetes
+
+| Capa | Qué respalda | Herramienta |
+|------|-------------|-------------|
+| Manifiestos | YAMLs de configuración | Git + ArgoCD ✓ |
+| Estado del cluster | Todos los objetos (Secrets, CRDs, etc.) | K3s SQLite snapshot |
+| Datos de PVs | Archivos escritos por las aplicaciones | Velero |
+
+---
+
+### Backup de K3s (SQLite)
+
+K3s usa SQLite (no etcd) en clusters de un solo server. El estado completo del cluster vive en tres archivos dentro del contenedor server-0:
+
+```bash
+docker exec k3d-curso-k8s-server-0 ls /var/lib/rancher/k3s/server/db/
+# state.db       → base de datos principal
+# state.db-shm   → shared memory para acceso concurrente
+# state.db-wal   → Write-Ahead Log de transacciones pendientes
+```
+
+La tabla `kine` dentro de SQLite almacena todos los objetos del cluster en formato etcd-compatible:
+
+```bash
+sqlite3 ~/k3s-backups/state.db "SELECT name FROM kine LIMIT 20;"
+```
+
+Script de backup con timestamp y retención de 7 copias: `scripts/backup-k3s.sh`
+
+```bash
+./scripts/backup-k3s.sh
+# Backup completado: /Users/.../k3s-backups/20260615-173332
+```
+
+---
+
+### Velero — Backup de Persistent Volumes
+
+Velero respalda tanto los recursos de Kubernetes como los datos de los PVs. Requiere un storage backend compatible con S3.
+
+**Instalación de MinIO** (storage S3-compatible dentro del cluster):
+
+```bash
+helm repo add minio https://charts.min.io/
+helm install minio minio/minio \
+  --namespace velero \
+  --create-namespace \
+  --set rootUser=admin \
+  --set rootPassword=admin123 \
+  --set mode=standalone \
+  --set persistence.size=2Gi \
+  --set resources.requests.memory=256Mi
+```
+
+Consola web de MinIO:
+
+```bash
+kubectl port-forward svc/minio-console -n velero 9001:9001 &
+# http://localhost:9001  →  crear bucket "velero"
+```
+
+**Instalación de Velero** apuntando a MinIO:
+
+```bash
+velero install \
+  --provider aws \
+  --plugins velero/velero-plugin-for-aws:v1.11.0 \
+  --bucket velero \
+  --secret-file /dev/stdin \
+  --use-volume-snapshots=false \
+  --backup-location-config region=minio,s3ForcePathStyle=true,s3Url=http://minio.velero.svc.cluster.local:9000 <<EOF
+[default]
+aws_access_key_id=admin
+aws_secret_access_key=admin123
+EOF
+```
+
+**Crear backup:**
+
+```bash
+velero backup create backup-inicial --include-namespaces default
+velero backup describe backup-inicial
+```
+
+**Restaurar desde backup:**
+
+> Importante: pausar ArgoCD antes de borrar recursos, sino lo restaura automáticamente antes que Velero.
+
+```bash
+# Pausar ArgoCD auto-sync
+kubectl patch application nginx-lab -n argocd --type merge -p '{"spec":{"syncPolicy":null}}'
+
+# Simular desastre
+kubectl delete deployment nginx
+kubectl delete svc nginx-service nginx-nodeport
+kubectl delete configmap nginx-config
+
+# Restaurar con Velero
+velero restore create --from-backup backup-inicial
+
+# Reactivar ArgoCD
+kubectl patch application nginx-lab -n argocd --type merge -p '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true}}}}'
+```
+
+**ArgoCD vs Velero:**
+- **ArgoCD** restaura configuración desde Git — no restaura datos de PVs
+- **Velero** restaura configuración + datos de PVs
+- Son complementarios, no alternativos
+
+---
+
+### Problema de recursos con Podman Machine
+
+Con múltiples workloads (ArgoCD + MinIO + nginx + Traefik) en 2GiB de RAM, el cluster puede saturarse. Señales:
+
+- `kubectl` devuelve `EOF` o `TLS handshake timeout`
+- `docker logs k3d-curso-k8s-server-0` muestra `http: Handler timeout`
+
+Solución permanente — ampliar RAM de Podman Machine:
+
+```bash
+podman machine stop
+podman machine set --memory 4096
+podman machine start
+```
+
+Si el server-0 se reinicia y `kubectl` falla con `EOF`, reiniciar el proxy:
+
+```bash
+docker restart k3d-curso-k8s-serverlb
+```
