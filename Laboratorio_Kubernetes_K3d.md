@@ -596,7 +596,69 @@ helm upgrade mi-nginx bitnami/nginx --namespace helm-demo --set replicaCount=3
 
 ---
 
-- [x] ArgoCD (pendiente práctica)
+### ArgoCD — GitOps
+
+ArgoCD implementa GitOps: Git es la única fuente de verdad para el estado del cluster. ArgoCD vigila un repositorio y sincroniza automáticamente los cambios con el cluster.
+
+**Flujo GitOps:**
+```
+git push → ArgoCD detecta el cambio → aplica al cluster automáticamente
+```
+
+**Instalación:**
+
+```bash
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+```
+
+> El warning `Too long: may not be more than 262144 bytes` en los CRDs es conocido y no afecta el funcionamiento.
+
+**Acceso a la UI:**
+
+```bash
+kubectl port-forward svc/argocd-server -n argocd 8080:443
+# https://localhost:8080  (aceptar certificado autofirmado)
+```
+
+Contraseña inicial del usuario `admin`:
+
+```bash
+kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath="{.data.password}" | base64 --decode
+```
+
+**Application** — objeto que conecta el repo con el cluster:
+
+Archivo: `kubernetes-lab/argocd-app.yaml`
+
+```bash
+kubectl apply -f kubernetes-lab/argocd-app.yaml
+```
+
+Campos clave:
+- `source.repoURL` — repo de GitHub a vigilar
+- `source.path` — carpeta dentro del repo con los manifiestos
+- `syncPolicy.automated.selfHeal: true` — revierte cambios manuales en el cluster
+- `syncPolicy.automated.prune: true` — borra recursos si se eliminan del repo
+
+**Demo GitOps — cambio sin kubectl:**
+
+```bash
+# Modificar un manifiesto localmente
+git add .
+git commit -m "mensaje"
+git push origin main
+# ArgoCD detecta el cambio y aplica automáticamente al cluster
+```
+
+Ventajas:
+- Auditoría completa — cada cambio tiene un commit con autor y fecha
+- Rollback con `git revert`
+- Nadie toca el cluster directamente — Git manda
+
+---
+
+- [x] ArgoCD
 - [x] Helm
 ### Persistent Volumes
 
